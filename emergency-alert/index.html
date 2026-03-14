@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Women's Safety & Emergency Alert</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://cdn.emailjs.com/dist/email.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            padding: 20px;
+            max-width: 800px;
+            margin: auto;
+            background-color: #f9f1f7;
+        }
+        h1 {
+            text-align: center;
+            color: #b83280;
+        }
+        .card {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.1);
+            background-color: white;
+        }
+        input, textarea, select, button {
+            width: 100%;
+            margin-top: 10px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        button {
+            background-color: #b83280;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #9a285f;
+        }
+        #map {
+            width: 100%;
+            height: 400px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+        #transport-info {
+            margin-bottom: 20px;
+            background-color: #f0f0f0;
+            padding: 10px;
+            border-radius: 5px;
+            resize: none; /* Prevent resizing */
+        }
+        #videoContainer {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        video {
+            width: 100%;
+            max-width: 400px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Women's Safety & Emergency Alert</h1>
+    <p>If you're in danger, press the button below or say "Help me" to send an alert!</p>
+    <button id="panicButton">Send Emergency Alert</button>
+    <p id="statusMessage"></p>
+
+    <div class="card">
+        <h2>User Profile</h2>
+        <label for="userName">Name:</label>
+        <input type="text" id="userName" placeholder="Enter your name">
+        <label for="userEmail">Email:</label>
+        <input type="email" id="userEmail" placeholder="Enter your email">
+        <label for="userMobile">Mobile Number:</label>
+        <input type="text" id="userMobile" placeholder="Enter your mobile number">
+        <button id="saveProfile">Save Profile</button>
+    </div>
+
+    <div class="card">
+        <h2>Emergency Settings</h2>
+        <label for="emergencyMessage">Custom Emergency Message:</label>
+        <textarea id="emergencyMessage" rows="3" placeholder="Enter your emergency message"></textarea>
+        <label for="emergencyContacts">Emergency Contacts (comma-separated, phone or email):</label>
+        <input type="text" id="emergencyContacts" placeholder="e.g., +1234567890, email@example.com">
+        <button id="saveSettings">Save Settings</button>
+    </div>
+
+    <div id="map"></div>
+    <input type="text" id="search-location" placeholder="Enter location to search">
+    
+  <!-- Transport information text area -->
+  <textarea id="transport-info" rows="4" readonly></textarea>
+    
+    <button onclick="searchLocation()">Search Location</button>
+    <p id="location-status"></p>
+
+    <div class="card">
+        <h2>Report an Unsafe Area</h2>
+        <input type="text" id="location" placeholder="Enter location (e.g., Downtown Street)">
+        <textarea id="issue" placeholder="Describe the concern"></textarea>
+        <select id="zone-level">
+            <option value="safe">Safe (Green)</option>
+            <option value="moderate">Moderate (Yellow)</option>
+            <option value="dangerous">Dangerous (Red)</option>
+        </select>
+        <button onclick="submitReport()">Submit Report</button>
+    </div>
+
+    <div class="card" id="reports">
+        <h2>Recent Reports</h2>
+        <div id="report-list"></div>
+    </div>
+
+    <div class="card" id="videoContainer">
+        <h2>Camera Safety System</h2>
+        <video id="video" autoplay></video>
+        <button id="captureButton">Capture Image</button>
+        <button id="recordButton">Start Recording</button>
+        <button id="stopRecordingButton" disabled>Stop Recording</button>
+        <canvas id="canvas" style="display:none;"></canvas>
+    </div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        (function() {
+            emailjs.init("YOUR_USER_ID"); // Replace with your EmailJS User ID
+        })();
+
+        let map;
+        let currentCircle;
+        let mediaRecorder;
+        let recordedChunks = [];
+
+        const dangerousLocations = [
+            "Delhi", "Mumbai", "Kolkata", "Bangalore", "Hyderabad", "Ahmedabad", "Pune", "Jaipur", "Lucknow", "Patna", "Bhopal", "Indore", "Nagpur", "Thiruvananthapuram"
+        ];
+
+        const moderateLocations = [];
+
+        const transportSafety = {
+            "chennai": {
+                safest: ["Chennai Metro", "DTC Electric Buses", "App-Based Cabs"],
+                dangerous: ["Motorcycles & Scooters", "Private & Unregulated Buses", "Walking at Night in Unsafe Areas"]
+            },
+            "coimbatore": {
+                safest: ["Government City Buses", "Electric Autos", "App-Based Cabs"],
+                dangerous: ["Motorcycles & Scooters", "Private Mini Buses", "Jaywalking"]
+            },
+            "madurai": {
+                safest: ["Government Buses", "Cycle Rickshaws", "App-Based Cabs"],
+                dangerous: ["Motorcycles & Scooters", "Private Mini Buses", "Traffic Congestion Areas"]
+            },
+            "tiruchirappalli": {
+                safest: ["Government City Buses", "App-Based Cabs", "Auto-Rickshaws (Regulated)"],
+                dangerous: ["Motorcycles & Scooters", "Private Mini Buses", "Overcrowded Market Areas"]
+            },
+            "salem": {
+                safest: ["Government Buses", "App-Based Cabs", "Electric Autos"],
+                dangerous: ["Motorcycles & Scooters", "Private Buses", "Highway Roads (At Night)"]
+            },
+            "erode": {
+                safest: ["Government Buses", "Electric Rickshaws", "App-Based Cabs"],
+                dangerous: ["Motorcycles & Scooters", "Private Mini Buses", "Traffic Congestion Areas"]
+            },
+            "vellore": {
+                safest: ["Government Buses", "App-Based Cabs", "Autos (Regulated)"]
+            },
+            "tirunelveli": {
+                safest: ["Government Buses", "Electric Rickshaws", "App-Based Cabs"],
+                dangerous: ["Motorcycles & Scooters", "Private Buses", "Overcrowded Market Areas"]
+            },
+            "thoothukudi": {
+                safest: ["Government Buses", "Cycle Rickshaws", "App-Based Cabs"],
+                dangerous: ["Motorcycles & Scooters", "Private Mini Buses", "Traffic Congestion Areas"]
+            },
+            "dindigul": {
+                safest: ["Government Buses", "App-Based Cabs", "Electric Autos"],
+                dangerous: ["Motorcycles & Scooters", "Private Buses", "Highway Roads (At Night)"]
+            },
+            "thanjavur": {
+                safest: ["Government City Buses", "Auto-Rickshaws", "App-Based Cabs"],
+                dangerous: ["Motorcycles & Scooters", "Private Mini Buses", "Jaywalking"]
+            },
+            "virudhunagar": {
+                safest: ["Government Buses", "App-Based Cabs", "Electric Rickshaws"],
+                dangerous: ["Motorcycles & Scooters", "Private Buses", "Traffic Congestion Areas"]
+            },
+            "namakkal": {
+                safest: ["Government Buses", "Electric Rickshaws", "App-Based Cabs"],
+                dangerous: ["Motorcycles & Scooters", "Private Mini Buses", "Overloaded Public Transport"]
+            },
+            "kanyakumari": {
+                safest: ["Government Buses", "Cycle Rickshaws", "App-Based Cabs"],
+                dangerous: ["Motorcycles & Scooters", "Traffic Congestion Areas", "Unregulated Private Buses"]
+            },
+            "delhi": {
+                safest: ["Delhi Metro", "DTC Electric Buses", "App-Based Cabs"],
+                dangerous: ["Motorcycles & Scooters", "Private & Unregulated Buses", "Walking at Night in Unsafe Areas"]
+            },
+            "mumbai": {
+                safest: ["Mumbai Metro & Local Trains (With Women’s Compartments)", "BEST Buses", "Ferries"],
+                dangerous: ["Mumbai Local Trains (During Rush Hours)", "Two-Wheelers", "Walking Along Traffic Zones"]
+            },
+            "kolkata": {
+                safest: ["Kolkata Metro", "Trams", "Government Buses"],
+                dangerous: ["Private Mini Buses", "Motorcycles & Rickshaws", "Walking in Some Crowded Areas"]
+            },
+            "bangalore": {
+                safest: ["Namma Metro", "BMTC Electric Buses", "App-Based Cabs"],
+                dangerous: ["Motorcycles & Scooters", "Traffic Congestion Areas", "Unregulated Autos"]
+            },
+            "hyderabad": {
+                safest: ["Hyderabad Metro", "TSRTC Government Buses", "App-Based Cabs"],
+                dangerous: ["Motorcycles & Scooters", "Private Buses", "Highway Roads (At Night)"]
+            },
+            "ahmedabad": {
+                safest: ["Ahmedabad Metro", "BRTS Buses", "App-Based Cabs"],
+                dangerous: ["Motorcycles & Scooters", "Traffic Congestion Areas", "Overloaded Public Transport"]
+            },
+            "pune": {
+                safest: ["PMPML Buses", "App-Based Cabs", "Electric Rickshaws"],
+                dangerous: ["Motorcycles & Scooters", "Private Buses", "Unregulated Autos"]
+            },
+            "jaipur": {
+                safest: ["Jaipur Metro", "Low-Floor Government Buses", "App-Based Cabs"],
+                dangerous: ["Motorcycles & Scooters", "Traffic Congestion Areas", "Unregulated Private Buses"]
+            },
+            "lucknow": {
+                safest: ["Lucknow Metro", "Government City Buses", "App-Based Cabs"],
+                dangerous: ["Motorcycles & Scooters", "Private Mini Buses", "Jaywalking"]
+            },
+            "patna": {
+                safest: ["Electric Buses", "Cycle Rickshaws", "App-Based Cabs"],
+                dangerous: ["Private Buses", "Two-Wheelers", "Jaywalking"]
+            },
+            "bhopal": {
+                safest: ["Bhopal Metro (Upcoming)", "BRTS Buses", "App-Based Cabs"],
+                dangerous: ["Two-Wheelers", "Private Buses", "Overcrowded Market Areas"]
+            },
+            "indore": {
+                safest: ["City Buses", "Electric Autos", "App-Based Cabs"],
+                dangerous: ["Private Buses", "Two-Wheelers", "Jaywalking"]
+            },
+            "nagpur": {
+                safest: ["Nagpur Metro", "Government Buses", "App-Based Cabs"],
+                dangerous: ["Two-Wheelers", "Private Buses", "Traffic Congestion Areas"]
+            },
+            "thiruvananthapuram": {
+                safest: ["KSRTC Electric Buses", "Cycle Rickshaws", "App-Based Cabs"],
+                dangerous: ["Two-Wheelers", "Private Mini Buses", "Jaywalking"]
+            }
+        };
+
+        function initMap() {
+            map = L.map('map').setView([20.5937, 78.9629], 5);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+            loadReports();
+        }
+
+        function searchLocation() {
+            const query = document.getElementById("search-location").value.trim().toLowerCase();
+            if (!query) {
+                alert("Please enter a location.");
+                return;
+            }
+            fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.length > 0) {
+                        const lat = data[0].lat;
+                        const lon = data[0].lon;
+                        map.setView([lat, lon], 14);
+                        classifyLocation(query, lat, lon);
+                    } else {
+                        alert("Location not found.");
+                    }
+                })
+                .catch(error => console.error("Error:", error));
+        }
+
+        function getTransportSafetyInfo(location) {
+            const lowerCaseLocation = location.toLowerCase();
+            if (transportSafety[lowerCaseLocation]) {
+                const safest = transportSafety[lowerCaseLocation].safest ? transportSafety[lowerCaseLocation].safest.join(', ') : 'None';
+                const dangerous = transportSafety[lowerCaseLocation].dangerous ? transportSafety[lowerCaseLocation].dangerous.join(', ') : 'None';
+                return `Safest Types of Transport: ${safest}\nMost Dangerous Types of Transport: ${dangerous}`;
+            } else {
+                return "No transport information available for this location.";
+            }
+        }
+
+        function classifyLocation(location, lat, lon) {
+            const locationStatus = document.getElementById("location-status");
+            const transportInfo = document.getElementById("transport-info");
+
+            let color;
+            if (dangerousLocations.map(loc => loc.toLowerCase()).includes(location.toLowerCase())) {
+                locationStatus.textContent = "This area is classified as Dangerous.";
+                color = "red";
+            } else if (moderateLocations.map(loc => loc.toLowerCase()).includes(location.toLowerCase())) {
+                locationStatus.textContent = "This area is classified as Moderate.";
+                color = "yellow";
+            } else {
+                locationStatus.textContent = "This area is classified as Safe.";
+                color = "green";
+            }
+
+            if (currentCircle) {
+                map.removeLayer(currentCircle);
+            }
+
+            currentCircle = L.circle([lat, lon], {
+                color: color,
+                fillColor: color,
+                fillOpacity: 0.5,
+                radius: 200
+            }).addTo(map);
+
+            transportInfo.value = getTransportSafetyInfo(location);
+        }
+
+        function submitReport() {
+            const location = document.getElementById("location").value.trim();
+            const issue = document.getElementById("issue").value.trim();
+            const level = document.getElementById("zone-level").value;
+            if (!location || !issue) {
+                alert("Please fill all fields.");
+                return;
+            }
+            const report = { location, issue, level };
+            const reports = JSON.parse(localStorage.getItem("reports")) || [];
+            reports.unshift(report);
+            localStorage.setItem("reports", JSON.stringify(reports));
+            loadReports();
+            markZoneOnMap(location, level);
+            document.getElementById("location").value = "";
+            document.getElementById("issue").value = "";
+
+            if (isDangerousLocation(location)) {
+                sendSmsAlert(location, issue);
+            }
+        }
+
+        function isDangerousLocation(location) {
+            return dangerousLocations.some(dangerousLocation => 
+                location.toLowerCase().includes(dangerousLocation.toLowerCase())
+            );
+        }
+
+        function loadReports() {
+            const reportList = document.getElementById("report-list");
+            reportList.innerHTML = "";
+            const reports = JSON.parse(localStorage.getItem("reports")) || [];
+            reports.forEach(report => {
+                const div = document.createElement("div");
+                div.classList.add("card");
+                div.innerHTML = `<strong>${report.location}</strong><p>${report.issue}</p><p>Zone: ${report.level}</p>`;
+                reportList.appendChild(div);
+                markZoneOnMap(report.location, report.level);
+            });
+        }
+
+        function markZoneOnMap(location, level) {
+            fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(location)}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.length > 0) {
+                        const color = level === "safe" ? "green" : level === "moderate" ? "yellow" : "red";
+                        L.circle([data[0].lat, data[0].lon], {
+                            color, fillColor: color, fillOpacity: 0.5, radius: 200
+                        }).addTo(map).bindPopup(`<strong>${location}</strong><br>Zone Level: ${level}`);
+                    }
+                })
+                .catch(error => console.error("Error:", error));
+        }
+
+        function sendSmsAlert(location, issue) {
+            const emergencyContacts = (localStorage.getItem('emergencyContacts') || '').split(',');
+            const customMessage = document.getElementById('emergencyMessage').value.trim();
+            const msg = customMessage ? customMessage : "Help, I am in trouble!";
+
+            emergencyContacts.forEach(contact => {
+                const trimmedContact = contact.trim();
+                fetch('http://localhost:3000/send-sms', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ to: trimmedContact, message: `${msg} An unsafe area has been reported at ${location}. Issue: ${issue}.` }),
+                })
+                .then(response => {
+                    if (response.ok) {
+                        console.log(`Danger alert SMS sent to ${trimmedContact}.`);
+                    } else {
+                        console.error(`Failed to send SMS alert to ${trimmedContact}.`);
+                    }
+                })
+                .catch(error => console.error("Error sending SMS:", error));
+            });
+        }
+
+        document.addEventListener("DOMContentLoaded", initMap);
+
+        const panicButton = document.getElementById('panicButton');
+        const statusMessage = document.getElementById('statusMessage');
+        const saveSettingsButton = document.getElementById('saveSettings');
+        const saveProfileButton = document.getElementById('saveProfile');
+
+        if (localStorage.getItem('emergencyMessage')) document.getElementById('emergencyMessage').value = localStorage.getItem('emergencyMessage');
+        if (localStorage.getItem('emergencyContacts')) document.getElementById('emergencyContacts').value = localStorage.getItem('emergencyContacts');
+        if (localStorage.getItem('userName')) document.getElementById('userName').value = localStorage.getItem('userName');
+        if (localStorage.getItem('userEmail')) document.getElementById('userEmail').value = localStorage.getItem('userEmail');
+        if (localStorage.getItem('userMobile')) document.getElementById('userMobile').value = localStorage.getItem('userMobile');
+
+        saveSettingsButton.addEventListener('click', () => {
+            const newContacts = document.getElementById('emergencyContacts').value;
+            const oldContacts = localStorage.getItem('emergencyContacts');
+            const newMessage = document.getElementById('emergencyMessage').value;
+            const oldMessage = localStorage.getItem('emergencyMessage');
+
+            localStorage.setItem('emergencyMessage', newMessage);
+            localStorage.setItem('emergencyContacts', newContacts);
+
+            if (newContacts !== oldContacts || newMessage !== oldMessage) {
+                alert("Emergency settings have been updated!");
+            }
+
+            statusMessage.textContent = 'Settings saved!';
+        });
+
+        saveProfileButton.addEventListener('click', () => {
+            const userName = document.getElementById('userName').value;
+            const userEmail = document.getElementById('userEmail').value;
+            const userMobile = document.getElementById('userMobile').value;
+
+            localStorage.setItem('userName', userName);
+            localStorage.setItem('userEmail', userEmail);
+            localStorage.setItem('userMobile', userMobile);
+
+            statusMessage.textContent = 'Profile saved!';
+        });
+
+        async function triggerAlert() {
+            statusMessage.textContent = 'Starting camera and sending alert...';
+            try {
+                // Start the camera
+                await startCamera();
+
+                const geo = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(pos => res(pos.coords), rej));
+                const msg = `${localStorage.getItem('emergencyMessage') || 'Emergency!'} Location: ${geo.latitude}, ${geo.longitude}`;
+                const contacts = (localStorage.getItem('emergencyContacts') || '').split(',');
+
+                // Capture image and start recording
+                captureImage();
+                startRecording();
+
+                for (const contact of contacts) {
+                    const trimmedContact = contact.trim();
+                    if (trimmedContact.includes('@')) {
+                        await emailjs.send("YOUR_SERVICE_ID", "YOUR_TEMPLATE_ID", {
+                            to_email: trimmedContact,
+                            message: msg,
+                            from_name: localStorage.getItem('userName'),
+                        });
+                    } else {
+                        await fetch('http://localhost:3000/send-sms', {
+                            method: 'POST', headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ to: trimmedContact, message: msg }),
+                        });
+                    }
+                }
+                statusMessage.textContent = 'Alert sent!';
+            } catch (error) {
+                console.error("Error sending alert:", error);
+                statusMessage.textContent = 'Error sending alert. Please check your settings and try again.';
+            }
+        }
+
+        panicButton.addEventListener('click', triggerAlert);
+
+        // Camera functionality
+        const video = document.getElementById('video');
+        const captureButton = document.getElementById('captureButton');
+        const recordButton = document.getElementById('recordButton');
+        const stopRecordingButton = document.getElementById('stopRecordingButton');
+        const canvas = document.getElementById('canvas');
+
+        async function startCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: true,
+                audio: true // Include audio in the stream
+            });
+            video.srcObject = stream;
+
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.ondataavailable = event => {
+                recordedChunks.push(event.data);
+            };
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = 'recording.webm';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+            };
+        }
+
+        captureButton.addEventListener('click', () => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const context = canvas.getContext('2d');
+            context.drawImage(video, 0, 0);
+            const imageData = canvas.toDataURL('image/png');
+            const a = document.createElement('a');
+            a.href = imageData;
+            a.download = 'captured-image.png';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        });
+
+        recordButton.addEventListener('click', () => {
+            recordedChunks = [];
+            mediaRecorder.start();
+            recordButton.disabled = true;
+            stopRecordingButton.disabled = false;
+        });
+
+        stopRecordingButton.addEventListener('click', () => {
+            mediaRecorder.stop();
+            recordButton.disabled = false;
+            stopRecordingButton.disabled = true;
+        });
+
+        startCamera();
+    </script>
+</body>
+</html>
+
+
+
+
+
